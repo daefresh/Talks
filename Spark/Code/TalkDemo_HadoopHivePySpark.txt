@@ -1,0 +1,246 @@
+## DEMO OUTLINE: Hive, Parquet, Spark SQL, DataFrame
+# 000 - Put Flat Files into HDFS and Tail
+# 001 - Create HIVE transient tables: explain LOCATION in DDL
+# 005 - Create HIVE view: explain purpose of VW
+# 010 - Create HIVE parquet table: explain datatype differences
+# 015 - Load into parquet table: use beeline to load data into parquet then select 4 columns
+# 019 - PySpark data loading 3 ways: HIVE, CSV, Parquet
+# 020 - PySpark data access examples: parquet from hive, and pull from cassandra
+# 025 - PySpark data wrangling: split-apply-combine, scalar function
+# 030 - PySpark save to parquet
+# 030 - PySpark save to Cassandra 
+
+
+## Precursor
+sudo service cassandra stop
+sudo service mongod stop
+
+
+## This is NOT a complete step-by-step process for running the code (e.g. not all tables)
+
+## DEMO CODE: Hive, Parquet, Spark SQL, DataFrame
+# 000 - Put Flat Files into HDFS and Tail
+# Copy files and automatically create directories in hdfs (explain power of hdfs) (file exists warnings may occur)
+hadoop fs -copyFromLocal -f ~/Documents/FH_FO_JPN/* /user/yoda/morningstar
+# Directory of structured files, add a new file and Hive automatically includes it, no need to do LOAD DATA
+hadoop fs -ls /user/yoda/morningstar/InvestmentVehicle/
+# Tail of flat file in HDFS
+hadoop fs -tail /user/yoda/morningstar/InvestmentVehicle/AllHoldings25_FO_JPN_M_InvestmentVehicle_20140610.csv
+
+
+# 001 - Create HIVE transient tables: explain DDL of TERMINATED, LOCATION, TBLPROPERTIES, look mom no loading!
+cd ~
+beeline --color=true --showHeader=true --verbose
+# Connect to HiveServer2
+!connect jdbc:hive2://localhost:10000
+# Shows all tables and views in Hive Metastore
+show tables;
+# Creates transient table mapped to multiple flat files in directory and skips header record
+# What's so brilliant about this is: 
+#  (a) HDFS is your staging area and you save on disk space in contrary to creating a _Staging database in an RDBMS 
+#  (b) raw files are 100% in-tact and you build queries ontop of them so rest-assured no one is mucking with your data
+#  (c) you can easily partition the data by month of data delivery for faster access
+#  (d) simply drop new files into HDFS and viola, now you can query them, super cool
+# HIVE DDL: https://cwiki.apache.org/confluence/display/Hive/LanguageManual+DDL
+CREATE EXTERNAL TABLE IF NOT EXISTS ImportDataFullHoldingsInvestmentVehicle(
+InvestmentVehicle_Id int,
+Identifier string,
+PackageBody_Id int,
+DataEffectiveDT date,
+DataObjectInstanceVersionKey bigint
+) ROW FORMAT DELIMITED FIELDS TERMINATED BY '|' LOCATION "hdfs:///user//yoda//morningstar//InvestmentVehicle//" TBLPROPERTIES("skip.header.line.count"="1")
+;
+# Show first ten rows
+select Identifier, DataEffectiveDT from ImportDataFullHoldingsInvestmentVehicle limit 10; 
+
+
+# 005 - Create HIVE view: explain purpose of VW
+CREATE VIEW IF NOT EXISTS ImportDataFullHoldingsHoldingLevelFlatVW
+AS
+select 
+IV.DataObjectInstanceVersionKey,
+IV.DataEffectiveDT,
+IV.InvestmentVehicle_Id,
+IV.Identifier as IV_Id,
+SCB.ShareClassBasics_Id,
+SCB.CUSIP as SCB_CUSIP,
+SCB.Ticker as SCB_Ticker,
+SCB.LegalType as SCB_LegalType,
+SCB.Name as SCB_Name,
+HO.Operation_Id,
+FSC.FundShareClass_Id,
+FSC.Identifier as FSC_Id,
+PL.PortfolioList_Id,
+HP.Portfolio_Id,
+HP.ExternalId as HP_ExternalId,
+HP.CurrencyId,
+PS.PortfolioSummary_Id,
+PS.PortfolioDate as P_Date,
+H.Holding_Id,
+HD.HoldingDetail_Id,
+HD.ExternalId as HD_ExternalId,
+HD.Identifier as HD_Id,
+HD.CUSIP,
+HD.ISIN,
+HD.SEDOL,
+HD.Symbol,
+HD.Region, 
+HD.Sector, 
+HD.Country, 
+HD.Currency, 
+HD.CurrencyCode, 
+HD.SecurityName, 
+HD.LegalType, 
+HD.StyleBox, 
+HD.MarketValue, 
+HD.CostBasis, 
+HD.MaturityDate, 
+HD.AccruedInterest, 
+HD.Coupon, 
+HD.HoldingYTDReturn, 
+HD.MarketCapital, 
+HD.LocalMarketValue, 
+HD.PaymentType, 
+HD.Rule144AEligible, 
+HD.AltMinTaxEligible, 
+HD.LessThanOneYearBond, 
+HD.FirstBoughtDate, 
+HD.Weighting, 
+HD.NumberOfShare, 
+HD.ShareChange
+from ImportDataFullHoldingsHoldingDetail HD
+inner join ImportDataFullHoldingsHolding H
+on HD.Holding_Id = H.Holding_Id
+and HD.DataObjectInstanceVersionKey = H.DataObjectInstanceVersionKey
+inner join ImportDataFullHoldingsPortfolio HP
+on H.Portfolio_Id = HP.Portfolio_Id
+and H.DataObjectInstanceVersionKey = HP.DataObjectInstanceVersionKey
+inner join ImportDataFullHoldingsPortfolioList PL
+on HP.PortfolioList_Id = PL.PortfolioList_Id
+and HP.DataObjectInstanceVersionKey = PL.DataObjectInstanceVersionKey
+inner join ImportDataFullHoldingsInvestmentVehicle IV
+on PL.InvestmentVehicle_Id = IV.InvestmentVehicle_Id
+and PL.DataObjectInstanceVersionKey = IV.DataObjectInstanceVersionKey
+inner join ImportDataFullHoldingsFundShareClass FSC
+on IV.InvestmentVehicle_Id = FSC.InvestmentVehicle_Id
+and IV.DataObjectInstanceVersionKey = FSC.DataObjectInstanceVersionKey
+inner join ImportDataFullHoldingsOperation HO
+on FSC.FundShareClass_Id = HO.FundShareClass_Id
+and FSC.DataObjectInstanceVersionKey = HO.DataObjectInstanceVersionKey
+inner join ImportDataFullHoldingsShareClassBasics SCB
+on HO.Operation_Id = SCB.Operation_Id
+and HO.DataObjectInstanceVersionKey = SCB.DataObjectInstanceVersionKey
+inner join ImportDataFullHoldingsPortfolioSummary PS
+on HP.Portfolio_Id = PS.Portfolio_Id
+and HP.DataObjectInstanceVersionKey = PS.DataObjectInstanceVersionKey
+;
+# Joins together 18 files on their key
+select p_date, iv_id, legaltype, securityname, isin, marketvalue, weighting from ImportDataFullHoldingsHoldingLevelFlatVW where legaltype not in ('FO', 'C') limit 10; 
+
+
+# 010 - Create HIVE parquet table: explain datatype differences
+cd ~
+beeline --color=true --showHeader=true --verbose
+!connect jdbc:hive2://localhost:10000
+show tables;
+drop table ImportDataFullHoldingsHoldingLevelFlat_Parquet;
+CREATE TABLE IF NOT EXISTS ImportDataFullHoldingsHoldingLevelFlat_Parquet (
+dataobjectinstanceversionkey bigint,
+dataeffectivedt     timestamp,
+investmentvehicle_id int,
+iv_id               string,
+shareclassbasics_id int,
+scb_cusip           string,
+scb_ticker          string,
+scb_legaltype       string,
+scb_name            string,
+operation_id        int,
+fundshareclass_id   int,
+fsc_id              string,
+portfoliolist_id    int,
+portfolio_id        int,
+hp_externalid       string,
+currencyid          string,
+portfoliosummary_id int,
+p_date              timestamp,
+holding_id          int,
+holdingdetail_id    int,
+hd_externalid       string,
+hd_id               string,
+cusip               string,
+isin                string,
+sedol               string,
+symbol              string,
+region              int,
+sector              string,
+country             string,
+currency            string,
+currencycode        string,
+securityname        string,
+legaltype           string,
+stylebox            int,
+marketvalue         bigint,
+costbasis           decimal,
+maturitydate        timestamp,
+accruedinterest     decimal,
+coupon              decimal,
+holdingytdreturn    decimal,
+marketcapital       int,
+localmarketvalue    string,
+paymenttype         string,
+rule144aeligible    string,
+altmintaxeligible   string,
+lessthanoneyearbond string,
+firstboughtdate     timestamp,
+weighting           decimal,
+numberofshare       bigint,
+sharechange         bigint
+) 
+STORED AS PARQUET
+;
+
+
+# 015 - Load into parquet table: use beeline to load data into parquet then select 4 columns
+insert into table ImportDataFullHoldingsHoldingLevelFlat_Parquet
+select *
+from ImportDataFullHoldingsHoldingLevelFlatVW
+;
+select p_date, iv_id, legaltype, marketvalue from importdatafullholdingsholdinglevelflat_parquet limit 10;
+select p_date, iv_id, isin, marketvalue, weighting from importdatafullholdingsholdinglevelflat_parquet where legaltype = "BC" limit 10; # Convertible Bond Holdings
+select p_date, securityname, legaltype, min(marketvalue) from importdatafullholdingsholdinglevelflat_parquet where marketvalue < 0 and legaltype not in ('C') group by p_date, securityname, legaltype order by p_date, securityname, legaltype limit 10; # Top Shorted Securities
+
+
+# 019 - PySpark data loading 3 ways: HIVE, CSV, Parquet
+# Export HIVE to CSV
+INSERT OVERWRITE LOCAL DIRECTORY 
+'/tmp/ImportDataFullHoldingsHoldingLevelFlat'
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY '|' 
+ESCAPED BY '"'
+LINES TERMINATED BY '\n'
+NULL DEFINED AS 'NULL'
+STORED AS TEXTFILE
+select distinct iv_id, p_date, cusip, sedol, isin, securityname, marketvalue, weighting from ImportDataFullHoldingsHoldingLevelFlat_Parquet
+;
+# Rename file
+cp /tmp/ImportDataFullHoldingsHoldingLevelFlat/000000_0 ~/Documents/HoldingsFlat.csv
+tail ~/Documents/HoldingsFlat.csv
+# Put into HDFS
+hadoop fs -copyFromLocal -f ~/Documents/HoldingsFlat.csv /user/yoda/morningstar
+
+
+# 020 - PySpark data access examples: 
+# https://github.com/TargetHolding/pyspark-cassandra
+export PYSPARK_CASSANDRA_ROOT=/opt/pyspark-cassandra/target
+IPYTHON_OPTS="notebook --no-mathjax" pyspark \
+--jars $PYSPARK_CASSANDRA_ROOT/pyspark_cassandra-0.1.4.jar \
+--driver-class-path $PYSPARK_CASSANDRA_ROOT/pyspark_cassandra-0.1.4.jar \
+--py-files $PYSPARK_CASSANDRA_ROOT/pyspark_cassandra-0.1.4-py2.7.egg \
+--conf spark.cassandra.connection.host=192.168.44.45 \
+--verbose \
+--executor-memory 500M
+
+
+
+
+
