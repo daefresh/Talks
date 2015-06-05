@@ -15,8 +15,8 @@ I’m a founder of a company that’s focused on financial analytics with a visi
 
 
 # PoC Steps
-1. Follow these instructions http://goo.gl/cAEQtD to create a Hadoop cluster with Spark, Parquet, and Python
-2. Run the code in https://goo.gl/SEPllz to load in the test dataset and create your base tables
-3. Fire up PySpark in Jupyter and step through each line of Spark code with your test dataset https://goo.gl/UDhLkk
-4. Peruse the slides https://goo.gl/Bk8FFV and connect the dots for the bigger picture
+1. Peruse the slides https://goo.gl/Bk8FFV to absorb the "what" and the "why"
+2. Follow these instructions http://goo.gl/cAEQtD to create your own Hadoop & Spark cluster
+3. Run the code in https://goo.gl/SEPllz to load in the test dataset https://goo.gl/UDhLkk
+4. Fire up PySpark in Jupyter and step through each line of Spark code with your test dataset 
 5. Hit me with any questions @dougeisenstein on Twitter
