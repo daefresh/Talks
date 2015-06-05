@@ -1,2 +1,2 @@
 # Talks
-Talks by Doug: Slides, Code, Data, and Instructions
+Slides, Code, Data, and Instructions
